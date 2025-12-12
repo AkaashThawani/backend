@@ -208,42 +208,106 @@ class ContentCalendarGenerator:
         existing_titles = [p.title for p in self.existing_posts]
         title_lock = threading.Lock()
 
-        # Distribute posts across weekdays (Mon-Fri preferred)
-        available_days = [0, 1, 2, 3, 4]  # Mon-Fri
-        if self.posts_per_week > 5:
-            available_days.extend([5, 6])  # Add Sat-Sun if needed
+        # Distribute posts across the week
+        if self.posts_per_week >= 7:
+            # For 7+ posts, distribute one per day across the full week
+            post_days = list(range(7))  # [0, 1, 2, 3, 4, 5, 6] - Mon to Sun
+            # If more than 7 posts, add duplicates
+            while len(post_days) < self.posts_per_week:
+                post_days.append(random.randint(0, 6))
+        else:
+            # For fewer posts, prefer weekdays but allow weekends
+            available_days = [0, 1, 2, 3, 4, 5, 6]  # Full week available
+            post_days = random.sample(
+                available_days * 2,  # Allow some duplicates
+                min(self.posts_per_week, len(available_days * 2))
+            )[:self.posts_per_week]
 
-        post_days = random.sample(
-            available_days * 2,  # Allow duplicates if many posts
-            min(self.posts_per_week, len(available_days * 2))
-        )[:self.posts_per_week]
+        print(f"⚡ Generating {len(post_days)} posts with day offsets: {sorted(post_days)}")
 
-        print(f"⚡ Generating {len(post_days)} posts in parallel...")
-        
-        # Parallel post generation with max 5 workers to avoid rate limiting
-        with ThreadPoolExecutor(max_workers=min(5, len(post_days))) as executor:
-            futures = {
-                executor.submit(self._create_post_safe, day_offset, existing_titles): day_offset 
-                for day_offset in sorted(post_days)
-            }
-            
-            for future in as_completed(futures):
+        if self.posts_per_week >= 7:
+            # Smart approach: strict deduplication with fallback for 7-day coverage
+            print(f"⚡ Generating posts with strict deduplication for 7-day coverage...")
+
+            # Step 1: Try to generate posts with strict deduplication
+            temp_posts = []
+            temp_titles = existing_titles.copy()
+
+            for day_offset in sorted(post_days):
                 try:
-                    post = future.result()
+                    post = self._create_post_safe(day_offset, temp_titles)
                     if post:
-                        with title_lock:
-                            # Thread-safe check and add
-                            if not self._is_title_similar(post.title, existing_titles):
-                                posts.append(post)
-                                existing_titles.append(post.title)
+                        temp_posts.append(post)
+                        temp_titles.append(post.title)
+                        print(f"✓ Generated unique post for day {day_offset}")
+                    else:
+                        print(f"⚠️ Could not generate unique post for day {day_offset}")
                 except Exception as e:
-                    print(f"❌ Error in parallel post generation: {e}")
+                    print(f"❌ Error generating post for day {day_offset}: {e}")
+
+            # Step 2: Check coverage and fill gaps if needed
+            covered_days = set()
+            for post in temp_posts:
+                day = (post.scheduled_time.date() - self.week_start.date()).days
+                covered_days.add(day)
+
+            target_days = set(range(7))
+            missing_days = target_days - covered_days
+
+            print(f"📊 Covered days: {sorted(covered_days)}")
+            print(f"📊 Missing days: {sorted(missing_days)}")
+
+            # Step 3: Fill missing days (allowing some duplication for coverage)
+            if missing_days:
+                print(f"🔄 Filling {len(missing_days)} missing days (may have some duplication)...")
+                for day_offset in sorted(missing_days):
+                    try:
+                        # Generate post for missing day (may be similar to existing)
+                        post = self._create_post(day_offset)
+                        if post is not None:
+                            temp_posts.append(post)
+                            temp_titles.append(post.title)
+                            print(f"✓ Added fill-in post for day {day_offset}")
+                        else:
+                            print(f"⚠️ Could not create fill-in post for day {day_offset}")
+                    except Exception as e:
+                        print(f"❌ Error creating fill-in post for day {day_offset}: {e}")
+
+            # Step 4: Add all posts to final list
+            posts.extend(temp_posts)
+            existing_titles.extend([p.title for p in temp_posts])
+
+        else:
+            # For fewer posts, use parallel generation with deduplication
+            print(f"⚡ Generating {len(post_days)} posts in parallel...")
+            with ThreadPoolExecutor(max_workers=min(5, len(post_days))) as executor:
+                futures = {
+                    executor.submit(self._create_post_safe, day_offset, existing_titles): day_offset
+                    for day_offset in sorted(post_days)
+                }
+
+                for future in as_completed(futures):
+                    try:
+                        post = future.result()
+                        if post:
+                            with title_lock:
+                                # For fewer posts, apply deduplication
+                                is_similar = self._is_title_similar(post.title, existing_titles)
+                                day_offset = (post.scheduled_time.date() - self.week_start.date()).days
+                                if not is_similar:
+                                    posts.append(post)
+                                    existing_titles.append(post.title)
+                                    print(f"✓ Added post for day {day_offset}")
+                                else:
+                                    print(f"⚠️ Skipped duplicate title for day {day_offset}: {post.title[:30]}...")
+                    except Exception as e:
+                        print(f"❌ Error in parallel post generation: {e}")
 
         # Sort by scheduled time for consistent ordering
         posts.sort(key=lambda p: p.scheduled_time)
         return posts
     
-    def _create_post(self, day_offset: int) -> Post:
+    def _create_post(self, day_offset: int) -> Optional[Post]:
         """Create a single post using AI or template fallback."""
         self._post_counter += 1
         
@@ -266,61 +330,60 @@ class ContentCalendarGenerator:
         # Select template (for guidance or fallback)
         template = random.choice(POST_TEMPLATES)
         
-        # Try AI generation first
+        # Only use AI generation - no template fallbacks
+        if not self.use_ai or not self._ai_generator:
+            print(f"❌ AI not available for {persona.username}, skipping post")
+            return None
+
         title = None
         body = None
-        
-        if self.use_ai and self._ai_generator:
-            try:
-                result = self._ai_generator.generate_post(
-                    persona_username=persona.username,
-                    persona_backstory=persona.backstory,
-                    persona_tone=persona.tone_style,
-                    subreddit=subreddit,
-                    keyword=primary_keyword,
-                    company_name=self.company.get("name", ""),
-                    company_description=self.company.get("description", ""),
-                    company_website=self.company.get("website", ""),
-                    template=template
-                )
-                
-                if result.success and result.content:
-                    title = result.content.get("title")
-                    body = result.content.get("body")
-                    print(f"✓ AI generated post for {persona.username}")
-                else:
-                    print(f"❌ AI generation failed for {persona.username}: {result.error}")
-            except Exception as e:
-                print(f"❌ AI exception for {persona.username}: {str(e)}")
-                import traceback
-                traceback.print_exc()
-        
-        # Fallback to template if AI failed or not enabled
-        if not title or not body:
-            title = template["title"].format(keyword=primary_keyword)
-            body = template["body"]
-            print(f"→ Using template for {persona.username}")
-        
+
+        try:
+            result = self._ai_generator.generate_post(
+                persona_username=persona.username,
+                persona_backstory=persona.backstory,
+                persona_tone=persona.tone_style,
+                subreddit=subreddit,
+                keyword=primary_keyword,
+                company_name=self.company.get("name", ""),
+                company_description=self.company.get("description", ""),
+                company_website=self.company.get("website", "")
+            )
+
+            if result.success and result.content:
+                title = result.content.get("title")
+                body = result.content.get("body")
+                print(f"✓ AI generated post for {persona.username}")
+            else:
+                print(f"❌ AI generation failed for {persona.username}: {result.error}")
+                return None
+        except Exception as e:
+            print(f"❌ AI exception for {persona.username}: {str(e)}")
+            return None
+
         # Schedule time (realistic hours: 8am-8pm)
         post_time = self.week_start + timedelta(
             days=day_offset,
             hours=random.randint(8, 20),
             minutes=random.randint(0, 59)
         )
-        
-        return Post(
-            post_id=f"P{self._post_counter}",
-            subreddit=subreddit,
-            title=title,
-            body=body,
-            author_username=author_username,
-            scheduled_time=post_time,
-            keyword_ids=[k["id"] for k in selected_keywords]
-        )
+
+        if title and body:
+            return Post(
+                post_id=f"P{self._post_counter}",
+                subreddit=subreddit,
+                title=title,
+                body=body,
+                author_username=author_username,
+                scheduled_time=post_time,
+                keyword_ids=[k["id"] for k in selected_keywords]
+            )
+        else:
+            return None
 
     def _create_post_safe(self, day_offset: int, existing_titles: List[str]) -> Optional[Post]:
         """Create a post with deduplication, returning None if unable to create unique content."""
-        max_attempts = 3
+        max_attempts = 3 if self.posts_per_week < 7 else 5  # More attempts for 7+ posts
 
         for attempt in range(max_attempts):
             try:
@@ -332,8 +395,15 @@ class ContentCalendarGenerator:
                     # Fallback to random generation
                     post = self._create_post(day_offset)
 
-                # Check if title is unique
-                if not self._is_title_similar(post.title, existing_titles):
+                # Check if post was created successfully
+                if post is None:
+                    print(f"⚠️ Post creation failed (attempt {attempt + 1}), trying again...")
+                    continue
+
+                # Check if title is unique (less strict for 7+ posts)
+                is_similar = self._is_title_similar(post.title, existing_titles)
+                if not is_similar or (self.posts_per_week >= 7 and attempt >= 2):
+                    # For 7+ posts, allow some similarity after a few attempts
                     return post
                 else:
                     print(f"⚠️ Title too similar (attempt {attempt + 1}), trying again...")
@@ -342,8 +412,16 @@ class ContentCalendarGenerator:
                 print(f"❌ Error creating post (attempt {attempt + 1}): {e}")
                 continue
 
-        # If we can't create a unique post after max attempts, skip it
-        print(f"⚠️ Unable to create unique post after {max_attempts} attempts, skipping...")
+        # If we can't create a post after max attempts, return it anyway for 7+ posts to ensure day coverage
+        if self.posts_per_week >= 7:
+            print(f"⚠️ Using fallback post for day {day_offset} after {max_attempts} attempts")
+            try:
+                post = self._create_post(day_offset)
+                return post
+            except Exception as e:
+                print(f"❌ Even fallback failed for day {day_offset}: {e}")
+
+        print(f"⚠️ Unable to create post after {max_attempts} attempts for day {day_offset}, skipping...")
         return None
 
     def _create_post_with_params(self, day_offset: int, params: Dict[str, Any]) -> Post:
@@ -377,8 +455,7 @@ class ContentCalendarGenerator:
                     keyword=primary_keyword,
                     company_name=self.company.get("name", ""),
                     company_description=self.company.get("description", ""),
-                    company_website=self.company.get("website", ""),
-                    template=template
+                    company_website=self.company.get("website", "")
                 )
 
                 if result.success and result.content:
@@ -435,8 +512,9 @@ class ContentCalendarGenerator:
         return all_comments
     
     def _generate_comment_thread(self, post: Post) -> List[Comment]:
-        """Generate dynamic number of comments with smart company mention distribution."""
+        """Generate dynamic number of comments with smart company mention distribution and strict deduplication."""
         comments = []
+        existing_comment_contents = []  # Track comment content for deduplication
 
         # Vary comment count (not always max) - 60% chance of fewer comments than max
         if random.random() < 0.6 and self.max_comments_per_post > 1:
@@ -463,21 +541,25 @@ class ContentCalendarGenerator:
                 should_mention_company=False
             )
 
-            op_comment = Comment(
-                comment_id=f"C{self._comment_counter}",
-                post_id=post.post_id,
-                parent_comment_id=None,
-                content=op_response_content,
-                author_username=post.author_username,
-                scheduled_time=op_response_time
-            )
-            comments.append(op_comment)
+            if op_response_content:
+                op_comment = Comment(
+                    comment_id=f"C{self._comment_counter}",
+                    post_id=post.post_id,
+                    parent_comment_id=None,
+                    content=op_response_content,
+                    author_username=post.author_username,
+                    scheduled_time=op_response_time
+                )
+                comments.append(op_comment)
+            else:
+                print(f"⚠️ Could not generate OP response comment, skipping...")
+                self._comment_counter -= 1  # Don't waste IDs
             return comments
 
         # Smart company mention distribution based on company_mention_rate setting
         max_product_mentions = max(1, int(num_comments * (self.company_mention_rate / 100)))
         product_mention_indices = set(random.sample(range(num_comments - 1), min(max_product_mentions, num_comments - 1)))
-        
+
         # Ensure at least one product mention if there are multiple comments
         if num_comments > 1 and not product_mention_indices:
             product_mention_indices.add(random.randint(0, num_comments - 2))
@@ -486,15 +568,21 @@ class ContentCalendarGenerator:
 
         # Track which comment mentions the product (for OP to reply to)
         product_mention_comment_id = None
-        
-        # Generate comments with variety
+
+        # Generate comments with variety and strict deduplication
         last_comment_time = post.scheduled_time
+        failed_attempts = 0
+        max_failed_attempts = 10  # Prevent infinite loops
 
         for i in range(num_comments):
+            if failed_attempts >= max_failed_attempts:
+                print(f"⚠️ Stopping comment generation after {max_failed_attempts} failed attempts")
+                break
+
             # Determine comment characteristics
             is_op_response = (i == num_comments - 1 and num_comments > 1)
             should_mention_company = i in product_mention_indices and not is_op_response
-            
+
             if is_op_response:
                 comment_type = "op_response"
                 commenter = next(p for p in self.personas if p.username == post.author_username)
@@ -532,14 +620,37 @@ class ContentCalendarGenerator:
 
             previous_content = comments[-1].content if comments else ""
 
-            # Generate comment content with company mention flag
-            comment_content = self._generate_comment_content(
-                commenter=commenter,
-                post=post,
-                comment_type=comment_type,
-                previous_comment=previous_content,
-                should_mention_company=should_mention_company
-            )
+            # Generate comment content with strict deduplication
+            comment_content = None
+            max_comment_attempts = 5
+
+            for attempt in range(max_comment_attempts):
+                temp_content = self._generate_comment_content(
+                    commenter=commenter,
+                    post=post,
+                    comment_type=comment_type,
+                    previous_comment=previous_content,
+                    should_mention_company=should_mention_company
+                )
+
+                # Check if content was generated
+                if temp_content is None:
+                    print(f"⚠️ Comment generation failed (attempt {attempt + 1}), trying again...")
+                    continue
+
+                # Check for duplicates and repetitive patterns
+                if not self._is_comment_repetitive(temp_content, existing_comment_contents):
+                    comment_content = temp_content
+                    break
+                else:
+                    print(f"⚠️ Comment too similar (attempt {attempt + 1}), trying again...")
+
+            # If we couldn't generate a unique comment, skip this comment
+            if not comment_content:
+                print(f"⚠️ Could not generate unique comment for {commenter.username}, skipping...")
+                failed_attempts += 1
+                self._comment_counter -= 1  # Don't waste IDs
+                continue
 
             comment = Comment(
                 comment_id=f"C{self._comment_counter}",
@@ -550,8 +661,9 @@ class ContentCalendarGenerator:
                 scheduled_time=current_time
             )
             comments.append(comment)
+            existing_comment_contents.append(comment_content)
             last_comment_time = current_time
-            
+
             # Track product mention for OP to reply to
             if should_mention_company:
                 product_mention_comment_id = comment.comment_id
@@ -565,55 +677,43 @@ class ContentCalendarGenerator:
         comment_type: str,
         previous_comment: Optional[str] = None,
         should_mention_company: bool = True
-    ) -> str:
-        """Generate a single comment using AI or template fallback."""
+    ) -> Optional[str]:
+        """Generate a single comment using AI only - no template fallbacks."""
         product_name = self.company.get("name", "the product")
-        
-        # Try AI generation first
-        if self.use_ai and self._ai_generator:
-            try:
-                result = self._ai_generator.generate_comment(
-                    persona_username=commenter.username,
-                    persona_backstory=commenter.backstory,
-                    persona_tone=commenter.tone_style,
-                    post_title=post.title,
-                    post_body=post.body,
-                    company_name=product_name,
-                    company_description=self.company.get("description", ""),
-                    comment_type=comment_type,
-                    previous_comment=previous_comment,
-                    should_mention_company=should_mention_company
-                )
-                
-                if result.success and result.content:
-                    content = result.content.get("comment")
-                    if content:
-                        print(f"✓ AI generated {comment_type} comment for {commenter.username}")
-                        # Add delay to avoid rate limiting
-                        import time
-                        time.sleep(0.5)
-                        return content
-                else:
-                    print(f"❌ AI comment failed for {commenter.username}: {result.error}")
-            except Exception as e:
-                print(f"❌ AI comment exception for {commenter.username}: {str(e)}")
-                import traceback
-                traceback.print_exc()
-        
-        # Fallback to templates
-        print(f"→ Using template for {comment_type} comment by {commenter.username}")
-        
-        if comment_type == "product_mention":
-            keyword = self.keywords[0]["keyword"] if self.keywords else "this"
-            return random.choice(COMMENT_TEMPLATES_POSITIVE).format(
-                product=product_name,
-                keyword=keyword,
-                feature="workflow automation"
+
+        # Only use AI generation - no template fallbacks
+        if not self.use_ai or not self._ai_generator:
+            print(f"❌ AI not available for {commenter.username}, skipping comment")
+            return None
+
+        try:
+            result = self._ai_generator.generate_comment(
+                persona_username=commenter.username,
+                persona_backstory=commenter.backstory,
+                persona_tone=commenter.tone_style,
+                post_title=post.title,
+                post_body=post.body,
+                company_name=product_name,
+                company_description=self.company.get("description", ""),
+                comment_type=comment_type,
+                previous_comment=previous_comment,
+                should_mention_company=should_mention_company
             )
-        elif comment_type == "validation":
-            return f"+1 {product_name}"
-        else:  # op_response
-            return random.choice(COMMENT_TEMPLATES_FOLLOWUP)
+
+            if result.success and result.content:
+                content = result.content.get("comment")
+                if content:
+                    print(f"✓ AI generated {comment_type} comment for {commenter.username}")
+                    # Add delay to avoid rate limiting
+                    import time
+                    time.sleep(0.5)
+                    return content
+            else:
+                print(f"❌ AI comment failed for {commenter.username}: {result.error}")
+        except Exception as e:
+            print(f"❌ AI comment exception for {commenter.username}: {str(e)}")
+
+        return None
     
     def _select_least_used(self, usage_dict: Dict[str, int]) -> str:
         """Select the least-used item to ensure even distribution."""

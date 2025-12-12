@@ -81,7 +81,6 @@ class GeminiContentGenerator:
         company_name: str,
         company_description: str = "",
         company_website: str = "",
-        template: Optional[Dict[str, str]] = None,
         max_retries: int = 3
     ) -> GenerationResult:
         """
@@ -109,8 +108,7 @@ class GeminiContentGenerator:
             keyword,
             company_name,
             company_description,
-            company_website,
-            template
+            company_website
         )
         
         for attempt in range(max_retries):
@@ -258,11 +256,10 @@ class GeminiContentGenerator:
         keyword: str,
         company_name: str,
         company_description: str,
-        company_website: str,
-        template: Optional[Dict[str, str]] = None
+        company_website: str
     ) -> str:
-        """Build prompt for post generation with optional template guidance"""
-        
+        """Build prompt for post generation"""
+
         # Build company context
         company_context = f"\n\nContext (for your knowledge, don't mention in post):"
         if company_description:
@@ -271,7 +268,7 @@ class GeminiContentGenerator:
             company_context += f"\n- Website: {company_website}"
         company_context += f"\n- Your post should ask about problems that {company_name} solves (based on keyword: '{keyword}')"
         company_context += f"\n- But DON'T mention {company_name} in your post - you're asking for solutions, not promoting"
-        
+
         # Base prompt
         base_prompt = f"""You are {username}, a Reddit user.
 
@@ -283,21 +280,8 @@ Your tone style: {tone}
 Task: Write an authentic Reddit post for {subreddit} that would naturally appear when someone searches for: "{keyword}"
 
 Your post should address this exact question/problem that people are searching for.{company_context}"""
-        
-        # Add template guidance if provided
-        if template:
-            template_guidance = f"""
 
-Here's an example style to inspire you (don't copy exactly, make it YOUR voice):
-Intent: {template.get('intent', 'question')}
-Example title format: {template.get('title', '')}
-Example body tone: {template.get('body', '')}
-
-Use this as inspiration but make it sound like YOU based on your background."""
-        else:
-            template_guidance = ""
-        
-        # Requirements
+        # Requirements with anti-formulaic instructions
         requirements = """
 
 Requirements:
@@ -307,6 +291,8 @@ Requirements:
 - Address the EXACT search query/question: "{keyword}"
 - Your post should match what someone searching for this would want to read
 - Be curious and specific about what you need help with
+- AVOID formulaic "topic - question" formats like "Best AI tools in 2024?" or "topic - anyone have experience?"
+- Use varied, natural title structures that sound like real Reddit posts
 - Do NOT mention "{company_name}" in the post (you're asking for help, not promoting)
 - Do NOT use em-dashes (—) or fancy punctuation - use regular hyphens (-) or commas instead
 - Keep the post concise but engaging (50-150 words for body)
@@ -317,9 +303,9 @@ Return your response as valid JSON in this exact format:
   "body": "Your post body here"
 }}
 
-Remember: You're a real person with a real problem seeking genuine advice. Your post should naturally rank for the search query above."""
-        
-        return base_prompt + template_guidance + requirements.format(company_name=company_name, keyword=keyword)
+Remember: You're a real person with a real problem seeking genuine advice. Make your title sound authentic and varied, not like a generic search query."""
+
+        return base_prompt + requirements.format(company_name=company_name, keyword=keyword)
     
     def _build_comment_prompt(
         self,
