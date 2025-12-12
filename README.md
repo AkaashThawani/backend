@@ -1,22 +1,42 @@
 # OGTool Backend
 
-FastAPI backend for the Organic Growth Tool - automated Reddit content generation and scheduling.
+FastAPI backend for the Organic Growth Tool - automated Reddit content generation and scheduling with advanced AI-driven algorithms.
 
 ## Features
 
-- Content calendar generation with AI
-- Campaign management
-- Post and comment scheduling
-- Persona management
-- Promotion strategy configuration
-- Health monitoring endpoint
+- **Advanced Content Generation**: AI-powered content calendar generation with 7-day coverage
+- **Strict Deduplication**: Intelligent deduplication for posts and comments to ensure quality
+- **AI-Only Generation**: Pure AI-generated content with no template fallbacks
+- **Context-Aware Comments**: Company-mentioning comments that understand parent post context
+- **Campaign Management**: Full campaign lifecycle management
+- **Post & Comment Scheduling**: Automated scheduling across Reddit communities
+- **Persona Management**: Multi-persona support for diverse perspectives
+- **Promotion Strategy**: Configurable promotion strategies
+- **Health Monitoring**: Comprehensive health checks and metrics
+
+## Algorithm Highlights
+
+### Content Generation Algorithm
+- **7-Day Coverage**: Generates content across all 7 days of the week (Monday-Sunday)
+- **Smart Deduplication**: Attempts unique content first, fills gaps when needed for complete coverage
+- **AI-Only Content**: All posts and comments are 100% AI-generated with no template fallbacks
+- **Context Awareness**: Company comments have full access to parent post content for relevance
+- **Natural Conversations**: Creates realistic Reddit discussion threads
+
+### Key Capabilities
+- **Post Generation**: Creates diverse, engaging posts across multiple subreddits
+- **Comment Threads**: Generates contextual comment chains with company mentions
+- **Deduplication Logic**: Prevents repetitive content while ensuring coverage
+- **Persona Rotation**: Uses different personas for varied perspectives
+- **Keyword Targeting**: Natural integration of target keywords
 
 ## Tech Stack
 
 - **Framework**: FastAPI
 - **Database**: SQLite (SQLAlchemy ORM)
-- **AI**: OpenAI GPT-4
+- **AI**: Google Gemini AI (primary), OpenAI GPT-4 (fallback)
 - **Python**: 3.8+
+- **Validation**: Pydantic 2.9.2
 
 ## Setup
 
@@ -107,6 +127,34 @@ git remote add origin <your-backend-repo-url>
 git push -u origin main
 ```
 
+## Algorithm Details
+
+### Content Generation Process
+
+1. **Post Distribution**: For 7+ posts per week, distributes content across all 7 days
+2. **Deduplication Strategy**:
+   - Attempts to generate unique posts first
+   - If deduplication prevents 7-day coverage, fills gaps with additional content
+   - Ensures complete week coverage while minimizing duplicates
+3. **Comment Generation**:
+   - Creates contextual comment threads
+   - Company mentions are naturally integrated based on post content
+   - Strict deduplication prevents repetitive comments
+4. **AI Integration**:
+   - Primary: Google Gemini AI for content generation
+   - Fallback: OpenAI GPT-4 for reliability
+   - All content is 100% AI-generated with no template fallbacks
+
+### Recent Improvements
+
+- ✅ **7-Day Coverage**: Algorithm now generates content for all 7 days of the week
+- ✅ **Strict Deduplication**: Advanced deduplication for both posts and comments
+- ✅ **AI-Only Generation**: Removed all template fallbacks for pure AI content
+- ✅ **Context Awareness**: Company comments understand parent post content
+- ✅ **Deployment Compatibility**: Updated dependencies for better deployment support
+
 ## Deployment
 
 See `SETUP.md` for deployment instructions.
+
+**Note**: The application uses Pydantic 2.9.2 which includes pre-compiled wheels for better deployment compatibility on platforms like Render.
