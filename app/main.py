@@ -11,7 +11,11 @@ app = FastAPI(title="Reddit Mastermind API")
 # Configure CORS for frontend
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173","http://localhost:5174"], # Vite default port
+    allow_origins=[
+        "http://localhost:5173",
+        "http://localhost:5174",
+        "https://frontend-one-roan-57.vercel.app"
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
