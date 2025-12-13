@@ -399,7 +399,7 @@ def generate_schedule(campaign_id: int, db: Session = Depends(get_db)):
     # Ensure all changes are flushed to disk and session is cleared
     db.flush()
     db.expire_all()
-    db.close()
+    # Note: db.close() is handled by FastAPI's dependency injection in get_db()
     
     return {
         "status": "success",
