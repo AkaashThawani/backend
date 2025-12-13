@@ -396,6 +396,11 @@ def generate_schedule(campaign_id: int, db: Session = Depends(get_db)):
         for failed in failed_comments:
             print(f"  - {failed}")
     
+    # Ensure all changes are flushed to disk and session is cleared
+    db.flush()
+    db.expire_all()
+    db.close()
+    
     return {
         "status": "success",
         "posts_created": len(calendar.posts),
