@@ -171,7 +171,7 @@ git push -u origin main
    GEMINI_API_KEY=your_gemini_api_key_here
    ```
 
-4. **Python Version**: The app is configured for Python 3.11.0
+4. **Python Version**: The app is configured for Python 3.11.7
 
 ### Local Development
 
