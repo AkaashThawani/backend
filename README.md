@@ -171,6 +171,10 @@ DATABASE_URL=sqlite:///./ogtool.db
 GEMINI_API_KEY=your_gemini_api_key_here
 ```
 
+### AWS Elastic Beanstalk Deployment
+
+See `DEPLOY_AWS.md` for complete AWS deployment instructions using Elastic Beanstalk (free tier eligible).
+
 ### Local Development
 
 See `SETUP.md` for detailed local setup instructions.
