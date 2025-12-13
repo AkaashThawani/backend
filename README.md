@@ -155,6 +155,26 @@ git push -u origin main
 
 ## Deployment
 
-See `SETUP.md` for deployment instructions.
+### Render Deployment
 
-**Note**: The application uses Pydantic 2.9.2 which includes pre-compiled wheels for better deployment compatibility on platforms like Render.
+1. **Connect Repository**: Connect your GitHub repository to Render
+2. **Service Configuration**:
+   - **Service Type**: Web Service
+   - **Runtime**: Python 3
+   - **Build Command**: `pip install -r requirements.txt`
+   - **Start Command**: `python -m uvicorn app.main:app --host 0.0.0.0 --port $PORT`
+
+3. **Environment Variables**:
+   ```
+   OPENAI_API_KEY=your_openai_api_key_here
+   DATABASE_URL=sqlite:///./ogtool.db
+   GEMINI_API_KEY=your_gemini_api_key_here
+   ```
+
+4. **Python Version**: The app is configured for Python 3.11.0
+
+### Local Development
+
+See `SETUP.md` for detailed local setup instructions.
+
+**Note**: The application uses Pydantic 2.8.2 with pre-compiled wheels for better deployment compatibility on platforms like Render. The `render.yaml` file provides optimized deployment configuration.
